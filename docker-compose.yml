@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  # primeira caixa
+  meu-patient:
+    build: ./patient-service
+    ports:
+      - "3000:3000"
+    container_name: api-patient
+
+  #  egunda caixa
+  meu-auth:
+    build: ./auth-service
+    ports:
+      - "3001:3000" # Mágica: No PC roda na 3001, mas dentro da caixa é a 3000!
+    container_name: api-auth
