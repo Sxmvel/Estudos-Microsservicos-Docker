@@ -1,17 +1,14 @@
 const http = require('http');
 const { Pool } = require('pg');
 
-// 1. Configurando a chave do cofre! 
-
-//usa NOME DO SERVIÇO (meu-banco-dados) em vez de localhost
+// 1. Configurando a conexão com o banco de dados
 const pool = new Pool({
   connectionString: 'postgresql://admin:senha_super_secreta@meu-banco-dados:5432/clinica_db'
 });
 
-// 2. Função que prepara o banco de dados quando o serviço liga
+// 2. Função que prepara o banco quando o serviço liga
 async function inicializarBanco() {
   try {
-    // Cria a tabela se for a primeira vez rodando
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pacientes (
         id SERIAL PRIMARY KEY,
@@ -22,7 +19,6 @@ async function inicializarBanco() {
       );
     `);
     
-    // Verifica se a tabela está vazia. Se estiver, insere o João!
     const { rows } = await pool.query('SELECT * FROM pacientes');
     if (rows.length === 0) {
       await pool.query(`
@@ -36,22 +32,58 @@ async function inicializarBanco() {
   }
 }
 
-// Executa a preparação do banco
 inicializarBanco();
 
-// 3. O nosso servidor recebendo os pedidos
+// 3. O servidor que escuta os pedidos do Gateway
 const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
+
+  // ROTA 1: Ler os dados (GET)
+  if (req.method === 'GET') {
+    try {
+      const resultado = await pool.query('SELECT * FROM pacientes');
+      res.statusCode = 200;
+      res.end(JSON.stringify(resultado.rows));
+    } catch (error) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ erro: "Erro interno ao buscar dados no banco." }));
+    }
+  } 
   
-  try {
-    // Busca os dados REAIS direto do banco de dados
-    const resultado = await pool.query('SELECT * FROM pacientes');
+  // ROTA 2: Cadastrar novo paciente (POST)
+  else if (req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
     
-    res.statusCode = 200;
-    res.end(JSON.stringify(resultado.rows));
-  } catch (error) {
-    res.statusCode = 500;
-    res.end(JSON.stringify({ erro: "Erro interno ao buscar dados no banco." }));
+    req.on('end', async () => {
+      try {
+        const novoPaciente = JSON.parse(body);
+        
+        const query = `
+          INSERT INTO pacientes (nome, idade, exame, status) 
+          VALUES ($1, $2, $3, $4) RETURNING *;
+        `;
+        const valores = [novoPaciente.nome, novoPaciente.idade, novoPaciente.exame, novoPaciente.status];
+
+        const resultado = await pool.query(query, valores);
+        
+        res.statusCode = 201;
+        res.end(JSON.stringify({ 
+          mensagem: "Paciente cadastrado com sucesso!", 
+          paciente: resultado.rows[0] 
+        }));
+      } catch (error) {
+        console.error(error);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ erro: "Erro interno ao salvar no banco de dados." }));
+      }
+    });
+  } 
+  
+  // Qualquer outro método
+  else {
+    res.statusCode = 404;
+    res.end(JSON.stringify({ erro: "Método não suportado no patient-service" }));
   }
 });
 
